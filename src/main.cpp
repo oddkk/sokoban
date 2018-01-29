@@ -65,9 +65,176 @@ vec2 operator -(const vec2 &lhs, const vec2 &rhs) {
 	return res;
 }
 
+enum Direction {
+	DIR_LEFT,
+	DIR_RIGHT,
+	DIR_UP,
+	DIR_DOWN,
+};
+
+//      (name,  passable, symbol)
+#define TILE_TYPES \
+	TILE(WALL,  false,    '#')				\
+	TILE(FLOOR, true,     ' ')				\
+	TILE(GOAL,  true,     'x')
+
+//      (name,     symbol)
+#define ENTITY_TYPES \
+	ENTITY(NONE,   0)						\
+	ENTITY(PLAYER, '%')							\
+	ENTITY(BOX,    'b')
+
+enum TileType {
+#define TILE(name, passable, symbol) TILE_##name,
+	TILE_TYPES
+#undef TILE
+
+	TILE_LAST
+};
+
+struct TileDef {
+	TileType type;
+	const char *name;
+	bool passable;
+	char symbol;
+};
+
+TileDef tile_definitions[] = {
+#define TILE(name, passable, symbol) {TILE_##name, #name, passable, symbol},
+	TILE_TYPES
+#undef TILE
+};
+
+enum EntityType {
+#define ENTITY(name, symbol) ENTITY_##name,
+	ENTITY_TYPES
+#undef ENTITY
+
+	ENTITY_LAST
+};
+
+
+struct EntityDef {
+	EntityType type;
+	const char *name;
+	char symbol;
+};
+
+EntityDef entity_definitions[] = {
+#define ENTITY(name, symbol) {ENTITY_##name, #name, symbol},
+	ENTITY_TYPES
+#undef ENTITY
+};
+
+struct Tile {
+	TileType type;
+	EntityType entity;
+};
+
+struct Board
+{
+	vec2 size;
+	vec2 player_location;
+	Tile *tiles;
+};
+
+const char *map =
+	"########"
+	"#%b   x#"
+	"# b #  #"
+	"#   #  #"
+	"#   #  #"
+	"#   #  #"
+	"#     x#"
+	"########";
+
+Tile *get_tile(Board *board, vec2 pos) {
+	assert(pos.x >= 0 && pos.x < board->size.x);
+	assert(pos.y >= 0 && pos.y < board->size.y);
+	return &board->tiles[pos.x + pos.y * board->size.x];
+}
+
+bool load_board(Board *board, const char *mapdata, vec2 board_size) {
+	int board_length = board_size.x * board_size.y;
+
+	board->size = board_size;
+	board->player_location.x = 0;
+	board->player_location.y = 0;
+	board->tiles = (Tile *)calloc(board_length, sizeof(Tile));
+
+	for (int i = 0; i < board_length; i += 1) {
+		char c = mapdata[i];
+		vec2 p;
+		p.x = i % board_size.x;
+		p.y = i / board_size.x;
+
+		Tile tile = {};
+
+		switch (c) {
+		case '#':
+			tile.type = TILE_WALL;
+			break;
+		case ' ':
+			tile.type = TILE_FLOOR;
+			break;
+		case '%':
+			tile.type = TILE_FLOOR;
+			tile.entity = ENTITY_PLAYER;
+			board->player_location = p;
+			break;
+		case 'b':
+			tile.type = TILE_FLOOR;
+			tile.entity = ENTITY_BOX;
+			break;
+		case 'x':
+			tile.type = TILE_GOAL;
+			break;
+
+		case 0:
+			print_error("load map", "End of map data before the entire board is filled.");
+			free(board->tiles);
+			return false;
+		default:
+			print_error("load map", "Unrecognised tile symbol %c at (%i,%i)", c, p.x, p.y);
+			break;
+		}
+
+		board->tiles[i] = tile;
+	}
+
+	return true;
+}
+
+void print_board(Board *board)
+{
+	for (int y = 0; y < board->size.y; y += 1) {
+		for (int x = 0; x < board->size.x; x += 1) {
+			Tile *tile;
+			char out;
+
+			tile = get_tile(board, {x, y});
+
+			assert(tile->type < TILE_LAST);
+			assert(tile->entity < ENTITY_LAST);
+
+			out = tile_definitions[tile->type].symbol;
+
+			if (entity_definitions[tile->entity].symbol) {
+				out = entity_definitions[tile->entity].symbol;
+			}
+
+			printf("%c", out);
+		}
+		printf("\n");
+	}
+}
 
 int main(int argc, char *argv[])
 {
-	print_error("foo", "Hello, World!");
-	panic("asdf");
+	Board board;
+	if (!load_board(&board, map, {8, 8})) {
+		return -1;
+	}
+
+	print_board(&board);
 }
