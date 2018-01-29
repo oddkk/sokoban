@@ -1,5 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <linux/soundcard.h>
+#include <poll.h>
 
 void print_error(const char *tag, const char *fmt, ...) {
 	va_list ap;
@@ -19,6 +26,11 @@ void panic(const char *fmt, ...) {
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 	va_end(ap);
+	exit(-1);
+}
+
+void panic() {
+	fprintf(stderr, "[panic]\n");
 	exit(-1);
 }
 
@@ -72,20 +84,35 @@ enum Direction {
 	DIR_DOWN,
 };
 
-//      (name,  passable, symbol)
-#define TILE_TYPES \
-	TILE(WALL,  false,    '#')				\
-	TILE(FLOOR, true,     ' ')				\
-	TILE(GOAL,  true,     'x')
+enum LpColor {
+	COL_RED_OFF = 0x00,
+	COL_RED_LOW = 0x01,
+	COL_RED_MED = 0x02,
+	COL_RED_FUL = 0x03,
 
-//      (name,     symbol)
+	SET_PXL_CPY = 0x04,
+	SET_PXL_CLR = 0x08,
+
+	COL_GRN_OFF = 0x00,
+	COL_GRN_LOW = 0x10,
+	COL_GRN_MED = 0x20,
+	COL_GRN_FUL = 0x30,
+};
+
+//      (name,  passable, symbol, color)
+#define TILE_TYPES \
+	TILE(WALL,  false,    '#',   COL_RED_LOW)				\
+	TILE(FLOOR, true,     ' ',   0          )				\
+	TILE(GOAL,  true,     'x',   COL_GRN_LOW)
+
+//      (name,     symbol, color)
 #define ENTITY_TYPES \
-	ENTITY(NONE,   0)						\
-	ENTITY(PLAYER, '%')							\
-	ENTITY(BOX,    'b')
+	ENTITY(NONE,   0,     0)						\
+	ENTITY(PLAYER, '%',   COL_RED_FUL|COL_GRN_FUL)							\
+	ENTITY(BOX,    'b',   COL_GRN_FUL)
 
 enum TileType {
-#define TILE(name, passable, symbol) TILE_##name,
+#define TILE(name, passable, symbol, color) TILE_##name,
 	TILE_TYPES
 #undef TILE
 
@@ -97,16 +124,17 @@ struct TileDef {
 	const char *name;
 	bool passable;
 	char symbol;
+	uint8_t color;
 };
 
 TileDef tile_definitions[] = {
-#define TILE(name, passable, symbol) {TILE_##name, #name, passable, symbol},
+#define TILE(name, passable, symbol, color) {TILE_##name, #name, passable, symbol, color},
 	TILE_TYPES
 #undef TILE
 };
 
 enum EntityType {
-#define ENTITY(name, symbol) ENTITY_##name,
+#define ENTITY(name, symbol, color) ENTITY_##name,
 	ENTITY_TYPES
 #undef ENTITY
 
@@ -118,10 +146,11 @@ struct EntityDef {
 	EntityType type;
 	const char *name;
 	char symbol;
+	uint8_t color;
 };
 
 EntityDef entity_definitions[] = {
-#define ENTITY(name, symbol) {ENTITY_##name, #name, symbol},
+#define ENTITY(name, symbol, color) {ENTITY_##name, #name, symbol, color},
 	ENTITY_TYPES
 #undef ENTITY
 };
@@ -224,7 +253,8 @@ bool load_board(Board *board, const char *mapdata, vec2 board_size) {
 			break;
 
 		case 0:
-			panic("at the disco!");
+			print_error("load map", "End of map data before the entire board is filled.");
+			free(board->tiles);
 			return false;
 		default:
 			print_error("load map", "Unrecognised tile symbol %c at (%i,%i)", c, p.x, p.y);
@@ -313,28 +343,122 @@ void print_board(Board *board)
 	}
 }
 
+int lp_set_pixel(int dev, uint8_t x, uint8_t y, uint8_t color, uint8_t flags) {
+	uint8_t key = x + y * 16;
+	uint8_t vel;
+	vel  = color;
+	vel |= flags;
+	uint8_t packet[4] = {0x90, key, vel};
+	return write(dev, packet, sizeof(packet));
+}
+
+void lp_print_board(int dev, Board *board)
+{
+	for (int y = 0; y < board->size.y; y += 1) {
+		for (int x = 0; x < board->size.x; x += 1) {
+			Tile *tile;
+			uint8_t out;
+
+			tile = get_tile(board, {x, y});
+
+			assert(tile->type < TILE_LAST);
+			assert(tile->entity < ENTITY_LAST);
+
+			out = tile_definitions[tile->type].color;
+
+			if (entity_definitions[tile->entity].color) {
+				out = entity_definitions[tile->entity].color;
+			}
+
+			lp_set_pixel(dev, x, y, out, SET_PXL_CPY|SET_PXL_CLR);
+		}
+	}
+}
+
+void lp_clear_input(int dev) {
+	uint8_t buffer[3];
+
+	struct pollfd fds = {
+		.fd = dev,
+		.events = POLLIN,
+		.revents = 0,
+	};
+
+	while (poll(&fds, 1, 0)) {
+		read(dev, buffer, sizeof(buffer));
+	}
+}
+
+void lp_transition_out(int dev, uint8_t color) {
+	for (int i = 0; i < 16; ++i) {
+		for (int j = 0; j < i; ++j) {
+			int x = j;
+			int y = i - j;
+			if (x > 7 || y > 7)
+				continue;
+			lp_set_pixel(dev, x, y, color, 0);
+		}
+		usleep(100000);
+	}
+	usleep(2000000);
+}
+
 int main(int argc, char *argv[])
 {
+	const char *midi_device = "/dev/midi1";
+	int fd = open(midi_device, O_RDWR, 0);
+	if (fd < 0) {
+		print_error("midi", "Could not open %s", midi_device);
+		return -1;
+	}
+
 	Board board;
 	if (!load_board(&board, map, {8, 8})) {
 		return -1;
 	}
 
 	print_board(&board);
+	lp_print_board(fd, &board);
 	while (true) {
-		int r = fgetc(stdin);
-		switch (r) {
-		case 'h': move_player(&board, DIR_LEFT); break;
-		case 'j': move_player(&board, DIR_DOWN); break;
-		case 'k': move_player(&board, DIR_UP); break;
-		case 'l': move_player(&board, DIR_RIGHT); break;
-		default: continue;
+		uint8_t buffer[3];
+
+		read(fd, buffer, sizeof(buffer));
+
+		if (buffer[0] == 0x90 && buffer[2] == 0x7f) {
+			uint8_t x, y;
+			x = buffer[1] % 8;
+			y = buffer[1] / 16;
+
+			if (x == 0) {
+				move_player(&board, DIR_LEFT);
+			} else if (x == 7) {
+				move_player(&board, DIR_RIGHT);
+			} else if (y == 0) {
+				move_player(&board, DIR_UP);
+			} else if (y == 7) {
+				move_player(&board, DIR_DOWN);
+			}
+			lp_set_pixel(fd, x, y, COL_RED_FUL|COL_GRN_FUL, 0);
+		} else if (buffer[0] == 0xb0) {
+			switch (buffer[1] - 104) {
+			case 0: {
+				if (!load_board(&board, map, {8, 8})) {
+					return -1;
+				}
+			} break;
+			}
 		}
-		print_board(&board);
 
 		if (has_won(&board)) {
 			printf("You have won!\n");
-			break;
+			lp_transition_out(fd, COL_GRN_FUL);
+			return 0;
 		}
+
+		print_board(&board);
+		lp_print_board(fd, &board);
 	}
+
+	close(fd);
+	return 0;
 }
