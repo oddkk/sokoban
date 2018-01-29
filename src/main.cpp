@@ -37,6 +37,35 @@ bool _assert(bool condition, const char *msg, const char *cond_str, const char *
 #define assertm(cond, msg) _assert(cond, msg, #cond, __FILE__, __func__, __LINE__)
 #define assert(cond) _assert(cond, NULL, #cond, __FILE__, __func__, __LINE__)
 
+struct vec2 {
+	int x, y;
+};
+
+vec2 &operator +=(vec2 &lhs, const vec2 &rhs) {
+	lhs.x += rhs.x;
+	lhs.y += rhs.y;
+	return lhs;
+}
+
+vec2 &operator -=(vec2 &lhs, const vec2 &rhs) {
+	lhs.x -= rhs.x;
+	lhs.y -= rhs.y;
+	return lhs;
+}
+
+vec2 operator +(const vec2 &lhs, const vec2 &rhs) {
+	vec2 res = lhs;
+	res += rhs;
+	return res;
+}
+
+vec2 operator -(const vec2 &lhs, const vec2 &rhs) {
+	vec2 res = lhs;
+	res -= rhs;
+	return res;
+}
+
+
 int main(int argc, char *argv[])
 {
 	print_error("foo", "Hello, World!");
