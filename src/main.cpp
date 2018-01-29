@@ -154,6 +154,27 @@ Tile *get_tile(Board *board, vec2 pos) {
 	return &board->tiles[pos.x + pos.y * board->size.x];
 }
 
+bool point_inside_board(Board *board, vec2 pos) {
+	return (pos.x >= 0 && pos.x < board->size.x) &&
+		(pos.y >= 0 && pos.y < board->size.y);
+}
+
+vec2 dir_to_vec(Direction direction) {
+	vec2 dir = {};
+
+	switch (direction) {
+	case DIR_UP:   dir = { 0, -1}; break;
+	case DIR_DOWN: dir = { 0,  1}; break;
+	case DIR_LEFT: dir = {-1,  0}; break;
+	case DIR_RIGHT: dir = { 1,  0}; break;
+	default:
+		print_error("game", "Unknown direction");
+		break;
+	}
+
+	return dir;
+}
+
 bool load_board(Board *board, const char *mapdata, vec2 board_size) {
 	int board_length = board_size.x * board_size.y;
 
@@ -205,6 +226,58 @@ bool load_board(Board *board, const char *mapdata, vec2 board_size) {
 	return true;
 }
 
+bool move_player(Board *board, Direction direction)
+{
+	Tile *player_tile = get_tile(board, board->player_location);
+	assert(player_tile->entity == ENTITY_PLAYER);
+
+	vec2 dir = dir_to_vec(direction);
+
+	vec2 new_player_location = board->player_location + dir;
+
+	if (!point_inside_board(board, new_player_location)) {
+		return false;
+	}
+
+	Tile *player_target = get_tile(board, new_player_location);
+
+	if (!tile_definitions[player_target->type].passable) {
+		return false;
+	}
+
+	if (player_target->entity == ENTITY_BOX) {
+		vec2 new_box_location = new_player_location + dir;
+
+		if (!point_inside_board(board, new_box_location)) {
+			return false;
+		}
+
+		Tile *box_target = get_tile(board, new_box_location);
+
+		if (!tile_definitions[box_target->type].passable) {
+			return false;
+		}
+
+		if (box_target->entity != ENTITY_NONE) {
+			return false;
+		}
+
+		box_target->entity = ENTITY_BOX;
+		player_target->entity = ENTITY_NONE;
+	}
+
+	if (player_target->entity != ENTITY_NONE) {
+		return false;
+	}
+
+	player_tile->entity = ENTITY_NONE;
+	player_target->entity = ENTITY_PLAYER;
+
+	board->player_location = new_player_location;
+
+	return true;
+}
+
 void print_board(Board *board)
 {
 	for (int y = 0; y < board->size.y; y += 1) {
@@ -237,4 +310,15 @@ int main(int argc, char *argv[])
 	}
 
 	print_board(&board);
+	while (true) {
+		int r = fgetc(stdin);
+		switch (r) {
+		case 'w': move_player(&board, DIR_UP); break;
+		case 'a': move_player(&board, DIR_LEFT); break;
+		case 's': move_player(&board, DIR_DOWN); break;
+		case 'd': move_player(&board, DIR_RIGHT); break;
+		default: continue;
+		}
+		print_board(&board);
+	}
 }
