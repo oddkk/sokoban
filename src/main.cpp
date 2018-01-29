@@ -175,6 +175,18 @@ vec2 dir_to_vec(Direction direction) {
 	return dir;
 }
 
+bool has_won(Board *board) {
+	for (int i = 0; i < board->size.x * board->size.y; ++i) {
+		Tile *tile = &board->tiles[i];
+
+		if (tile->type == TILE_GOAL && tile->entity != ENTITY_BOX) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool load_board(Board *board, const char *mapdata, vec2 board_size) {
 	int board_length = board_size.x * board_size.y;
 
@@ -320,5 +332,10 @@ int main(int argc, char *argv[])
 		default: continue;
 		}
 		print_board(&board);
+
+		if (has_won(&board)) {
+			printf("You have won!\n");
+			break;
+		}
 	}
 }
