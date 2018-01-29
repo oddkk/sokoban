@@ -224,8 +224,7 @@ bool load_board(Board *board, const char *mapdata, vec2 board_size) {
 			break;
 
 		case 0:
-			print_error("load map", "End of map data before the entire board is filled.");
-			free(board->tiles);
+			panic("at the disco!");
 			return false;
 		default:
 			print_error("load map", "Unrecognised tile symbol %c at (%i,%i)", c, p.x, p.y);
