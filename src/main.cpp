@@ -324,10 +324,10 @@ int main(int argc, char *argv[])
 	while (true) {
 		int r = fgetc(stdin);
 		switch (r) {
-		case 'w': move_player(&board, DIR_UP); break;
-		case 'a': move_player(&board, DIR_LEFT); break;
-		case 's': move_player(&board, DIR_DOWN); break;
-		case 'd': move_player(&board, DIR_RIGHT); break;
+		case 'h': move_player(&board, DIR_LEFT); break;
+		case 'j': move_player(&board, DIR_DOWN); break;
+		case 'k': move_player(&board, DIR_UP); break;
+		case 'l': move_player(&board, DIR_RIGHT); break;
 		default: continue;
 		}
 		print_board(&board);
