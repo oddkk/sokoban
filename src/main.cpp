@@ -1,5 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <termios.h>
+#include <unistd.h>
+#include <signal.h>
+
+bool should_quit = false;
+struct termios orig_termios;
+
+void my_signal_handler(int sig) {
+	should_quit = true;
+}
 
 void print_error(const char *tag, const char *fmt, ...) {
 	va_list ap;
@@ -313,6 +323,10 @@ void print_board(Board *board)
 	}
 }
 
+void disable_raw_mode() {
+	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+}
+
 int main(int argc, char *argv[])
 {
 	Board board;
@@ -320,16 +334,35 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	struct sigaction int_handler = {.sa_handler=my_signal_handler};
+	sigaction(SIGINT, &int_handler, 0);
+
+	// Keep old keyboard mode and ensure it is reset at exit.
+	tcgetattr(STDIN_FILENO, &orig_termios);
+	atexit(disable_raw_mode);
+
+	// Set raw input mode
+	struct termios raw = orig_termios;
+	raw.c_lflag &= ~(ECHO | ICANON);
+	tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+
 	print_board(&board);
-	while (true) {
-		int r = fgetc(stdin);
-		switch (r) {
-		case 'a': move_player(&board, DIR_LEFT); break;
-		case 's': move_player(&board, DIR_DOWN); break;
-		case 'w': move_player(&board, DIR_UP); break;
-		case 'd': move_player(&board, DIR_RIGHT); break;
+	while (!should_quit) {
+		char c;
+		int err;
+		err = read(STDIN_FILENO, &c, 1);
+		if (err == 0) {
+			continue;
+		}
+
+		switch (c) {
+		case 'h': move_player(&board, DIR_LEFT);  break;
+		case 'j': move_player(&board, DIR_DOWN);  break;
+		case 'k': move_player(&board, DIR_UP);    break;
+		case 'l': move_player(&board, DIR_RIGHT); break;
 		default: continue;
 		}
+
 		print_board(&board);
 
 		if (has_won(&board)) {
@@ -337,4 +370,6 @@ int main(int argc, char *argv[])
 			break;
 		}
 	}
+
+
 }
